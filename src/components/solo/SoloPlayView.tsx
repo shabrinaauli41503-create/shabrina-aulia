@@ -286,7 +286,7 @@ export const SoloPlayView: React.FC = () => {
         </div>
         <div>
           <h2 className="text-2xl font-bold font-display text-white">Latihan Mandiri Selesai!</h2>
-          <p className="text-xs text-slate-400 mt-1">Berikut ringkasan performa pemahaman materi Flutter & Dart Anda.</p>
+          <p className="text-xs text-slate-400 mt-1">Berikut ringkasan performa pemahaman materi Pemrograman Web Anda.</p>
         </div>
 
         <div className="grid grid-cols-3 gap-3 pt-2">

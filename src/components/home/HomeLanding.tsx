@@ -103,7 +103,7 @@ export const HomeLanding: React.FC = () => {
           <ul className="space-y-2.5 text-xs text-slate-300">
             <li className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0" />
-              <span><strong>Kelola Data Soal:</strong> CRUD 32+ soal Flutter, kode Dart, filter kategori & tingkat kesulitan.</span>
+              <span><strong>Kelola Data Soal:</strong> CRUD 35+ soal Pemrograman Web, kode JS/HTML/SQL, filter kategori & tingkat kesulitan.</span>
             </li>
             <li className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0" />
@@ -156,7 +156,7 @@ export const HomeLanding: React.FC = () => {
             </li>
             <li className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />
-              <span><strong>Jawab Soal Flutter di HP:</strong> Countdown waktu, pilihan jawaban 4 warna, bonus kecepatan & combo streak.</span>
+              <span><strong>Jawab Soal Web di HP:</strong> Countdown waktu, pilihan jawaban 4 warna, bonus kecepatan & combo streak.</span>
             </li>
             <li className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />

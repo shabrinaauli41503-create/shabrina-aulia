@@ -21,6 +21,14 @@ export interface QuizQuestion {
   timeLimitSeconds?: number;
 }
 
+export interface PlayerAnswer {
+  questionId: string;
+  selectedOption: number;
+  isCorrect: boolean;
+  timeTakenSeconds: number;
+  pointsEarned: number;
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -31,13 +39,10 @@ export interface Player {
   streak: number;
   lastAnswerCorrect?: boolean;
   lastPointsEarned?: number;
-  answers: {
-    questionId: string;
-    selectedOption: number;
-    isCorrect: boolean;
-    timeTakenSeconds: number;
-    pointsEarned: number;
-  }[];
+  currentQuestionIndex: number; // What question the student is currently on
+  isFinished: boolean; // True once student finishes all questions
+  finishedAt?: number;
+  answers: PlayerAnswer[];
 }
 
 export type GameStage = 

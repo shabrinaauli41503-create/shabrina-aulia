@@ -11,7 +11,6 @@ import { DosenDashboard } from './components/dosen/DosenDashboard';
 import { MahasiswaJoin } from './components/mahasiswa/MahasiswaJoin';
 import { MahasiswaWaitingRoom } from './components/mahasiswa/MahasiswaWaitingRoom';
 import { MahasiswaPlayView } from './components/mahasiswa/MahasiswaPlayView';
-import { MahasiswaLeaderboardView } from './components/mahasiswa/MahasiswaLeaderboardView';
 import { MahasiswaPodiumView } from './components/mahasiswa/MahasiswaPodiumView';
 import { SoloPlayView } from './components/solo/SoloPlayView';
 
@@ -34,30 +33,12 @@ const MainRouter: React.FC = () => {
           <div>
             {!currentPlayer ? (
               <MahasiswaJoin />
-            ) : !activeSession || activeSession.stage === 'LOBBY' ? (
+            ) : !activeSession || activeSession.status === 'WAITING' ? (
               <MahasiswaWaitingRoom />
-            ) : activeSession.stage === 'COUNTDOWN' ? (
-              <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
-                <div className="text-center space-y-4">
-                  <div className="text-xs font-mono uppercase tracking-widest text-sky-400">
-                    Bersiaplah! Soal {activeSession.currentQuestionIndex + 1}
-                  </div>
-                  <div className="text-8xl sm:text-9xl font-black font-display text-white animate-bounce">
-                    ⚡
-                  </div>
-                  <p className="text-sm text-slate-300">
-                    Soal Flutter muncul di layar HP Anda dalam hitungan detik!
-                  </p>
-                </div>
-              </div>
-            ) : activeSession.stage === 'QUESTION' || activeSession.stage === 'ANSWER_REVEAL' ? (
-              <MahasiswaPlayView />
-            ) : activeSession.stage === 'LEADERBOARD' ? (
-              <MahasiswaLeaderboardView />
-            ) : activeSession.stage === 'PODIUM' ? (
+            ) : activeSession.status === 'COMPLETED' ? (
               <MahasiswaPodiumView />
             ) : (
-              <MahasiswaWaitingRoom />
+              <MahasiswaPlayView />
             )}
           </div>
         )}

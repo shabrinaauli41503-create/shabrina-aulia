@@ -1,34 +1,64 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuiz } from '../../context/QuizContext';
 import { AVATAR_OPTIONS } from '../../data/avatars';
-import { Smartphone, Sparkles, ArrowRight, CheckCircle2, User, Hash, AlertCircle } from 'lucide-react';
+import { Sparkles, ArrowRight, User, Hash, AlertCircle, CheckCircle2, RotateCw } from 'lucide-react';
 import { soundManager } from '../../utils/soundEffects';
 
 export const MahasiswaJoin: React.FC = () => {
   const { activeSession, joinSession, setRole } = useQuiz();
 
-  const [pin, setPin] = useState(activeSession ? activeSession.pin : '');
+  const [pin, setPin] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlPin = urlParams.get('pin');
+      if (urlPin && urlPin.trim().length === 6) return urlPin.trim();
+    }
+    return activeSession ? activeSession.pin : '';
+  });
+
   const [name, setName] = useState('');
   const [nim, setNim] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState('💙');
   const [errorMsg, setErrorMsg] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Sync PIN if activeSession changes or URL changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlPin = urlParams.get('pin');
+      if (urlPin && urlPin.trim().length === 6) {
+        setPin(urlPin.trim());
+      } else if (!pin && activeSession) {
+        setPin(activeSession.pin);
+      }
+    }
+  }, [activeSession]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
-    if (!pin.trim()) {
-      setErrorMsg('Masukkan 6-digit PIN kuis yang diberikan oleh Dosen!');
+    const cleanPin = pin.trim();
+    if (!cleanPin || cleanPin.length !== 6) {
+      setErrorMsg('Masukkan 6-digit Game PIN yang benar (misal: 518798)!');
       return;
     }
     if (!name.trim()) {
-      setErrorMsg('Masukkan Nama Lengkap Anda!');
+      setErrorMsg('Masukkan Nama Lengkap Mahasiswa!');
       return;
     }
 
-    const res = joinSession(pin, name, nim, selectedAvatar);
-    if (!res.success) {
-      setErrorMsg(res.error || 'Gagal bergabung ke sesi kuis.');
+    setIsLoading(true);
+    try {
+      const res = await joinSession(cleanPin, name.trim(), nim.trim(), selectedAvatar);
+      if (!res.success) {
+        setErrorMsg(res.error || 'Gagal bergabung ke sesi kuis. Pastikan PIN benar dan sesi kuis sudah dibuat oleh dosen.');
+      }
+    } catch {
+      setErrorMsg('Koneksi terputus. Pastikan perangkat Anda terhubung ke internet.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -37,10 +67,12 @@ export const MahasiswaJoin: React.FC = () => {
     if (activeSession) {
       setPin(activeSession.pin);
       setName('Muhammad Farhan');
-      setNim('2110512099');
+      setNim('2403020088');
       setSelectedAvatar('💙');
     } else {
-      setErrorMsg('Belum ada sesi kuis yang aktif. Buka "Panel Dosen" terlebih dahulu untuk membuat sesi.');
+      setName('Shabrina Aulia');
+      setNim('2403020025');
+      setSelectedAvatar('💙');
     }
   };
 
@@ -54,10 +86,10 @@ export const MahasiswaJoin: React.FC = () => {
             Q!
           </div>
           <h2 className="text-2xl font-black font-display text-white">
-            Gabung Game Quizzy<span className="text-amber-400">!</span>
+            Gabung Kuis Quizzy<span className="text-amber-400">!</span>
           </h2>
           <p className="text-xs text-slate-400">
-            Masukkan Game PIN dari layar host proyektor dan pilih avatar karaktermu.
+            Kuis Pemrograman Web Interaktif. Masukkan PIN dan Nama Anda untuk langsung mengerjakan.
           </p>
         </div>
 
@@ -80,7 +112,7 @@ export const MahasiswaJoin: React.FC = () => {
                   onClick={() => setPin(activeSession.pin)}
                   className="text-[11px] text-sky-400 hover:underline normal-case"
                 >
-                  Gunakan PIN Aktif ({activeSession.pin})
+                  Gunakan PIN ({activeSession.pin})
                 </button>
               )}
             </label>
@@ -90,11 +122,17 @@ export const MahasiswaJoin: React.FC = () => {
                 maxLength={6}
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="Misal: 849201"
-                className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl font-mono text-xl tracking-widest text-center text-sky-400 placeholder:text-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
+                placeholder="Misal: 518798"
+                className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl font-mono text-2xl font-bold tracking-widest text-center text-sky-400 placeholder:text-slate-600 focus:outline-none focus:border-sky-500 transition-colors"
                 required
               />
             </div>
+            {pin.length === 6 && (
+              <p className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1 font-mono">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Format PIN 6 Digit Valid
+              </p>
+            )}
           </div>
 
           {/* Student Name */}
@@ -108,7 +146,7 @@ export const MahasiswaJoin: React.FC = () => {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Contoh: Shabrina Aulia"
+                placeholder="Contoh: Anwar / Shabrina"
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-sky-500"
                 required
               />
@@ -126,7 +164,7 @@ export const MahasiswaJoin: React.FC = () => {
                 type="text"
                 value={nim}
                 onChange={(e) => setNim(e.target.value)}
-                placeholder="Contoh: 2110512012"
+                placeholder="Contoh: 2403020021"
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-sky-500"
               />
             </div>
@@ -164,10 +202,20 @@ export const MahasiswaJoin: React.FC = () => {
           {/* Submit button */}
           <button
             type="submit"
-            className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold text-sm shadow-lg shadow-sky-600/30 flex items-center justify-center gap-2 transition-all mt-4"
+            disabled={isLoading}
+            className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-bold text-sm shadow-lg shadow-sky-600/30 flex items-center justify-center gap-2 transition-all mt-4 disabled:opacity-50"
           >
-            <span>Masuk ke Waiting Room</span>
-            <ArrowRight className="w-4 h-4" />
+            {isLoading ? (
+              <>
+                <RotateCw className="w-4 h-4 animate-spin" />
+                <span>Menghubungkan ke Sesi...</span>
+              </>
+            ) : (
+              <>
+                <span>Masuk & Siap Mengerjakan</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
 

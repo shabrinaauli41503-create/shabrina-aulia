@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { QuizQuestion, QuizSession, Player, AppRole, GameStage } from '../types/quiz';
+import { QuizQuestion, QuizSession, Player, AppRole, GameStage, PlayerAnswer } from '../types/quiz';
 import { 
   getStoredQuestions, 
   saveStoredQuestions, 
@@ -12,6 +12,12 @@ import {
 } from '../utils/storage';
 import { soundManager } from '../utils/soundEffects';
 import { SIMULATED_STUDENTS } from '../data/avatars';
+import { 
+  pushSessionToCloud, 
+  fetchSessionFromCloud, 
+  savePlayerToCloud, 
+  fetchAllPlayersForPin 
+} from '../utils/cloudSync';
 
 interface QuizContextType {
   role: AppRole;
@@ -32,16 +38,18 @@ interface QuizContextType {
     shuffleQuestions?: boolean;
   }) => string; // returns PIN
   setGameStage: (stage: GameStage) => void;
-  nextQuestion: () => void;
+  startSession: () => void;
   endGame: () => void;
   addSimulatedStudents: (count?: number) => void;
   kickPlayer: (playerId: string) => void;
   
   // Mahasiswa / Player methods
   currentPlayer: Player | null;
-  joinSession: (pin: string, name: string, nim?: string, avatar?: string) => { success: boolean; error?: string };
-  submitAnswer: (optionIndex: number, timeSpentSec: number) => void;
+  joinSession: (pin: string, name: string, nim?: string, avatar?: string) => Promise<{ success: boolean; error?: string }>;
+  submitStudentAnswer: (optionIndex: number, timeSpentSec: number) => { isCorrect: boolean; points: number; nextIndex: number; isFinished: boolean };
+  advanceToNextQuestion: () => void;
   leaveSession: () => void;
+  syncWithCloud: () => Promise<void>;
 
   // Sound & Recaps
   isMuted: boolean;
@@ -61,19 +69,18 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [recaps, setRecaps] = useState<RecapRecord[]>(() => getStoredRecap());
 
   const channelRef = useRef<BroadcastChannel | null>(null);
-  const botTimersRef = useRef<NodeJS.Timeout[]>([]);
+  const botIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Setup BroadcastChannel for cross-tab multi-screen sync
+  // Cross-tab local sync via BroadcastChannel
   useEffect(() => {
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      const channel = new BroadcastChannel('quizmobile_channel');
+      const channel = new BroadcastChannel('quizzy_sync_v4');
       channelRef.current = channel;
 
       channel.onmessage = (event) => {
         const { type, payload } = event.data;
         if (type === 'SESSION_UPDATED') {
           setActiveSession(payload);
-          // If current player is in the session, update current player state too
           if (currentPlayer) {
             const updated = payload.players?.find((p: Player) => p.id === currentPlayer.id);
             if (updated) setCurrentPlayer(updated);
@@ -87,17 +94,141 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [currentPlayer]);
 
-  // Broadcast session changes to other tabs
+  // Broadcast session changes locally & push to cloud
   const broadcastSession = useCallback((session: QuizSession) => {
     saveStoredSession(session);
+    pushSessionToCloud(session);
     if (channelRef.current) {
       try {
         channelRef.current.postMessage({ type: 'SESSION_UPDATED', payload: session });
       } catch {
-        // broadcast fallback silent
+        // silent
       }
     }
   }, []);
+
+  // HOST POLLER: Polls cloud every 1 second to pick up all students (joining & answering)
+  useEffect(() => {
+    if (role !== 'DOSEN' || !activeSession || !activeSession.pin) return;
+    const pin = activeSession.pin;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const cloudPlayers = await fetchAllPlayersForPin(pin);
+        if (!cloudPlayers || cloudPlayers.length === 0) return;
+
+        setActiveSession(prev => {
+          if (!prev || prev.pin !== pin) return prev;
+
+          let hasChanges = false;
+          const currentList = [...prev.players];
+
+          for (const cp of cloudPlayers) {
+            const idx = currentList.findIndex(
+              p => p.id === cp.id || p.name.trim().toLowerCase() === cp.name.trim().toLowerCase()
+            );
+
+            if (idx === -1) {
+              // New student joined from phone/external device!
+              currentList.push(cp);
+              hasChanges = true;
+            } else {
+              // Existing student submitted answer or progressed
+              const existing = currentList[idx];
+              if (
+                cp.answers.length !== existing.answers.length ||
+                cp.score !== existing.score ||
+                cp.currentQuestionIndex !== existing.currentQuestionIndex ||
+                cp.isFinished !== existing.isFinished
+              ) {
+                currentList[idx] = {
+                  ...existing,
+                  ...cp,
+                  isBot: existing.isBot || cp.isBot,
+                };
+                hasChanges = true;
+              }
+            }
+          }
+
+          if (!hasChanges) return prev;
+
+          const updated: QuizSession = {
+            ...prev,
+            players: currentList,
+          };
+
+          saveStoredSession(updated);
+          pushSessionToCloud(updated);
+          return updated;
+        });
+      } catch (err) {
+        // silent
+      }
+    }, 1000);
+
+    return () => clearInterval(pollInterval);
+  }, [role, activeSession?.pin]);
+
+  // STUDENT POLLER: Polls cloud every 1 second to detect when Dosen starts the quiz or finishes
+  useEffect(() => {
+    if (role !== 'MAHASISWA' || !activeSession || !activeSession.pin) return;
+    const pin = activeSession.pin;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const cloudSession = await fetchSessionFromCloud(pin);
+        if (!cloudSession) return;
+
+        setActiveSession(prev => {
+          if (!prev) return cloudSession;
+
+          const statusChanged = cloudSession.status !== prev.status;
+          const stageChanged = cloudSession.stage !== prev.stage;
+          const playerCountChanged = cloudSession.players.length !== prev.players.length;
+
+          if (statusChanged || stageChanged || playerCountChanged) {
+            saveStoredSession(cloudSession);
+            return cloudSession;
+          }
+          return prev;
+        });
+
+        // Sync player's own record from cloud if updated
+        if (currentPlayer) {
+          const me = cloudSession.players.find(
+            p => p.id === currentPlayer.id || p.name.trim().toLowerCase() === currentPlayer.name.trim().toLowerCase()
+          );
+          if (me && (me.score !== currentPlayer.score || me.answers.length > currentPlayer.answers.length)) {
+            setCurrentPlayer(me);
+          }
+        }
+      } catch {
+        // silent
+      }
+    }, 1000);
+
+    return () => clearInterval(pollInterval);
+  }, [role, activeSession?.pin, currentPlayer?.id]);
+
+  const syncWithCloud = async () => {
+    if (!activeSession || !activeSession.pin) return;
+    try {
+      const cloudSession = await fetchSessionFromCloud(activeSession.pin);
+      if (cloudSession) {
+        setActiveSession(cloudSession);
+        saveStoredSession(cloudSession);
+        if (currentPlayer) {
+          const me = cloudSession.players.find(
+            p => p.id === currentPlayer.id || p.name.trim().toLowerCase() === currentPlayer.name.trim().toLowerCase()
+          );
+          if (me) setCurrentPlayer(me);
+        }
+      }
+    } catch {
+      // silent
+    }
+  };
 
   const toggleMute = () => {
     const muted = soundManager.toggleMute();
@@ -108,9 +239,9 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRecaps(getStoredRecap());
   };
 
-  // Question bank CRUD
+  // Question CRUD
   const addQuestion = (newQ: Omit<QuizQuestion, 'id'>) => {
-    const id = `flt-custom-${Date.now()}`;
+    const id = `web-custom-${Date.now()}`;
     const questionWithId: QuizQuestion = { ...newQ, id };
     const updated = [questionWithId, ...questions];
     setQuestions(updated);
@@ -134,7 +265,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setQuestions(defaultQs);
   };
 
-  // Create game session
+  // Host: Create session
   const createSession = ({
     title,
     questionCount,
@@ -148,7 +279,6 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     selectedCategory?: string;
     shuffleQuestions?: boolean;
   }): string => {
-    // Generate 6-digit PIN
     const pin = Math.floor(100000 + Math.random() * 900000).toString();
     
     let pool = [...questions];
@@ -165,7 +295,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const newSession: QuizSession = {
       pin,
-      title: title || 'UAS Pemrograman Web 2 (Kahoot Style)',
+      title: title || 'Quizzy! - Kuis Interaktif Pemrograman Web',
       createdAt: Date.now(),
       status: 'WAITING',
       questionIds: selectedIds,
@@ -183,7 +313,83 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return pin;
   };
 
-  // Add simulated classmates to make demo lively
+  // Host starts the session: All joined students can now answer!
+  const startSession = () => {
+    if (!activeSession) return;
+    const updated: QuizSession = {
+      ...activeSession,
+      status: 'IN_PROGRESS',
+      stage: 'QUESTION',
+      stageStartTime: Date.now(),
+    };
+    setActiveSession(updated);
+    broadcastSession(updated);
+    soundManager.playStart();
+
+    // Start bot simulation if bots are in session
+    simulateBots(updated);
+  };
+
+  // Simulate bot students answering gradually
+  const simulateBots = (session: QuizSession) => {
+    if (botIntervalRef.current) clearInterval(botIntervalRef.current);
+
+    const bots = session.players.filter(p => p.isBot && !p.isFinished);
+    if (bots.length === 0) return;
+
+    botIntervalRef.current = setInterval(() => {
+      setActiveSession(prev => {
+        if (!prev || prev.status !== 'IN_PROGRESS') return prev;
+
+        let changed = false;
+        const totalQ = prev.questionIds.length;
+
+        const updatedPlayers = prev.players.map(p => {
+          if (!p.isBot || p.isFinished) return p;
+
+          // 40% chance per tick to answer their next question
+          if (Math.random() < 0.45) {
+            const currentQIndex = p.currentQuestionIndex || 0;
+            if (currentQIndex < totalQ) {
+              const qId = prev.questionIds[currentQIndex];
+              const qObj = questions.find(q => q.id === qId);
+              const isCorrect = Math.random() < 0.8;
+              const points = isCorrect ? Math.round(900 + Math.random() * 500) : 0;
+              const nextIndex = currentQIndex + 1;
+              const isFinished = nextIndex >= totalQ;
+
+              changed = true;
+              return {
+                ...p,
+                score: p.score + points,
+                streak: isCorrect ? p.streak + 1 : 0,
+                currentQuestionIndex: nextIndex,
+                isFinished,
+                answers: [
+                  ...p.answers,
+                  {
+                    questionId: qId,
+                    selectedOption: isCorrect ? (qObj?.correctAnswer ?? 0) : ((qObj?.correctAnswer ?? 0) + 1) % 4,
+                    isCorrect,
+                    timeTakenSeconds: Math.round(3 + Math.random() * 10),
+                    pointsEarned: points,
+                  }
+                ]
+              };
+            }
+          }
+          return p;
+        });
+
+        if (!changed) return prev;
+        const nextSession = { ...prev, players: updatedPlayers };
+        saveStoredSession(nextSession);
+        pushSessionToCloud(nextSession);
+        return nextSession;
+      });
+    }, 2000);
+  };
+
   const addSimulatedStudents = (count: number = 6) => {
     if (!activeSession) return;
     const available = SIMULATED_STUDENTS.filter(
@@ -199,6 +405,8 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isBot: true,
       score: 0,
       streak: 0,
+      currentQuestionIndex: 0,
+      isFinished: false,
       answers: [],
     }));
 
@@ -211,7 +419,6 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     broadcastSession(updatedSession);
   };
 
-  // Remove player from session
   const kickPlayer = (playerId: string) => {
     if (!activeSession) return;
     const updatedSession: QuizSession = {
@@ -222,213 +429,114 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
     broadcastSession(updatedSession);
   };
 
-  // Trigger bots to answer during QUESTION stage
-  const simulateBotAnswers = useCallback((session: QuizSession) => {
-    // Clear any previous bot timers
-    botTimersRef.current.forEach(t => clearTimeout(t));
-    botTimersRef.current = [];
-
-    const currentQId = session.questionIds[session.currentQuestionIndex];
-    const currentQ = questions.find(q => q.id === currentQId);
-    if (!currentQ) return;
-
-    const bots = session.players.filter(p => p.isBot);
-    bots.forEach(bot => {
-      // Random answer delay between 2.5s and (timePerQuestion - 2s)
-      const maxDelay = Math.max(3000, (session.timePerQuestion - 3) * 1000);
-      const delay = Math.floor(2500 + Math.random() * (maxDelay - 2500));
-
-      const timer = setTimeout(() => {
-        setActiveSession(prev => {
-          if (!prev || prev.stage !== 'QUESTION') return prev;
-          // Check if bot already answered
-          const botPlayer = prev.players.find(p => p.id === bot.id);
-          if (!botPlayer || botPlayer.answers.some(a => a.questionId === currentQId)) return prev;
-
-          // 78% accuracy probability for realistic scoring distribution
-          const isCorrect = Math.random() < 0.78;
-          let selectedOption = currentQ.correctAnswer;
-          if (!isCorrect) {
-            const wrongOptions = [0, 1, 2, 3].filter(idx => idx !== currentQ.correctAnswer);
-            selectedOption = wrongOptions[Math.floor(Math.random() * wrongOptions.length)];
-          }
-
-          const timeTaken = delay / 1000;
-          let points = 0;
-          let newStreak = 0;
-
-          if (isCorrect) {
-            const speedRatio = Math.max(0, (session.timePerQuestion - timeTaken) / session.timePerQuestion);
-            points = Math.round(1000 + speedRatio * 500 + Math.min(botPlayer.streak * 100, 500));
-            newStreak = botPlayer.streak + 1;
-          }
-
-          const updatedPlayers = prev.players.map(p => {
-            if (p.id === bot.id) {
-              return {
-                ...p,
-                score: p.score + points,
-                streak: newStreak,
-                lastAnswerCorrect: isCorrect,
-                lastPointsEarned: points,
-                answers: [
-                  ...p.answers,
-                  {
-                    questionId: currentQId,
-                    selectedOption,
-                    isCorrect,
-                    timeTakenSeconds: timeTaken,
-                    pointsEarned: points,
-                  }
-                ]
-              };
-            }
-            return p;
-          });
-
-          const nextSession = { ...prev, players: updatedPlayers };
-          broadcastSession(nextSession);
-          return nextSession;
-        });
-      }, delay);
-
-      botTimersRef.current.push(timer);
-    });
-  }, [questions, broadcastSession]);
-
-  // Set game stage
   const setGameStage = (stage: GameStage) => {
     if (!activeSession) return;
-    const now = Date.now();
-    let updatedStatus = activeSession.status;
-    if (stage === 'QUESTION' || stage === 'COUNTDOWN') {
-      updatedStatus = 'IN_PROGRESS';
-    } else if (stage === 'PODIUM') {
-      updatedStatus = 'COMPLETED';
-    }
-
-    const updatedSession: QuizSession = {
+    const updated: QuizSession = {
       ...activeSession,
       stage,
-      status: updatedStatus,
-      stageStartTime: now,
+      stageStartTime: Date.now(),
     };
-
-    setActiveSession(updatedSession);
-    broadcastSession(updatedSession);
-
-    if (stage === 'COUNTDOWN') {
-      soundManager.playStart();
-    } else if (stage === 'PODIUM') {
-      soundManager.playVictory();
-      // Record recap
-      const sortedPlayers = [...updatedSession.players].sort((a, b) => b.score - a.score);
-      const totalScore = sortedPlayers.reduce((acc, p) => acc + p.score, 0);
-      const avg = sortedPlayers.length > 0 ? Math.round(totalScore / sortedPlayers.length) : 0;
-      const recap: RecapRecord = {
-        id: `recap-${updatedSession.pin}-${Date.now()}`,
-        pin: updatedSession.pin,
-        sessionTitle: updatedSession.title,
-        date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-        totalQuestions: updatedSession.questionIds.length,
-        playersCount: updatedSession.players.length,
-        averageScore: avg,
-        players: sortedPlayers,
-      };
-      saveRecapRecord(recap);
-      refreshRecaps();
-    } else if (stage === 'QUESTION') {
-      simulateBotAnswers(updatedSession);
-    }
-  };
-
-  // Move to next question or end kuis
-  const nextQuestion = () => {
-    if (!activeSession) return;
-    const nextIdx = activeSession.currentQuestionIndex + 1;
-    if (nextIdx < activeSession.questionIds.length) {
-      const updatedSession: QuizSession = {
-        ...activeSession,
-        currentQuestionIndex: nextIdx,
-        stage: 'COUNTDOWN',
-        stageStartTime: Date.now(),
-      };
-      setActiveSession(updatedSession);
-      broadcastSession(updatedSession);
-      soundManager.playStart();
-    } else {
-      setGameStage('PODIUM');
-    }
+    setActiveSession(updated);
+    broadcastSession(updated);
   };
 
   const endGame = () => {
-    setGameStage('PODIUM');
+    if (!activeSession) return;
+    if (botIntervalRef.current) clearInterval(botIntervalRef.current);
+
+    const sortedPlayers = [...activeSession.players].sort((a, b) => b.score - a.score);
+    const totalScore = sortedPlayers.reduce((acc, p) => acc + p.score, 0);
+    const avg = sortedPlayers.length > 0 ? Math.round(totalScore / sortedPlayers.length) : 0;
+
+    const recap: RecapRecord = {
+      id: `recap-${activeSession.pin}-${Date.now()}`,
+      pin: activeSession.pin,
+      sessionTitle: activeSession.title,
+      date: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      totalQuestions: activeSession.questionIds.length,
+      playersCount: activeSession.players.length,
+      averageScore: avg,
+      players: sortedPlayers,
+    };
+
+    saveRecapRecord(recap);
+    refreshRecaps();
+    soundManager.playVictory();
+
+    const updatedSession: QuizSession = {
+      ...activeSession,
+      status: 'COMPLETED',
+      stage: 'PODIUM',
+    };
+    setActiveSession(updatedSession);
+    broadcastSession(updatedSession);
   };
 
-  // Student methods
-  const joinSession = (pin: string, name: string, nim?: string, avatar: string = '💙') => {
+  // Student join method
+  const joinSession = async (pin: string, name: string, nim?: string, avatar: string = '💙'): Promise<{ success: boolean; error?: string }> => {
     const cleanPin = pin.trim();
     let session = activeSession && activeSession.pin === cleanPin ? activeSession : getStoredSessionByPin(cleanPin);
 
     if (!session) {
-      return { success: false, error: `PIN sesi "${cleanPin}" tidak ditemukan. Pastikan Dosen sudah membuat sesi.` };
+      const cloudSession = await fetchSessionFromCloud(cleanPin);
+      if (cloudSession) session = cloudSession;
     }
 
-    if (session.status === 'COMPLETED') {
-      return { success: false, error: 'Sesi kuis ini sudah selesai.' };
-    }
-
-    // Check if player name already taken
-    const existing = session.players.find(p => p.name.toLowerCase() === name.trim().toLowerCase());
-    let player: Player;
-    let updatedPlayers: Player[];
-
-    if (existing) {
-      player = existing;
-      updatedPlayers = session.players;
-    } else {
-      player = {
-        id: `student-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        name: name.trim(),
-        nim: nim?.trim() || undefined,
-        avatar,
-        score: 0,
-        streak: 0,
-        answers: [],
+    if (!session) {
+      return { 
+        success: false, 
+        error: `PIN "${cleanPin}" tidak ditemukan. Pastikan Dosen sudah membuka sesi kuis baru dan membagikan PIN di layar.` 
       };
-      updatedPlayers = [...session.players, player];
     }
+
+    const player: Player = {
+      id: `mhs-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      name: name.trim(),
+      nim: nim?.trim() || undefined,
+      avatar,
+      score: 0,
+      streak: 0,
+      currentQuestionIndex: 0,
+      isFinished: false,
+      answers: [],
+    };
+
+    // Save to isolated student cloud key
+    await savePlayerToCloud(cleanPin, player);
 
     const updatedSession: QuizSession = {
       ...session,
-      players: updatedPlayers,
+      players: [...session.players.filter(p => p.name.toLowerCase() !== player.name.toLowerCase()), player],
     };
 
     setActiveSession(updatedSession);
     setCurrentPlayer(player);
-    broadcastSession(updatedSession);
+    saveStoredSession(updatedSession);
     soundManager.playTap();
 
     return { success: true };
   };
 
-  const submitAnswer = (optionIndex: number, timeSpentSec: number) => {
-    if (!activeSession || !currentPlayer) return;
-    const currentQId = activeSession.questionIds[activeSession.currentQuestionIndex];
+  // Student submits answer and gets instant feedback, then advances to next question
+  const submitStudentAnswer = (
+    optionIndex: number, 
+    timeSpentSec: number
+  ): { isCorrect: boolean; points: number; nextIndex: number; isFinished: boolean } => {
+    if (!activeSession || !currentPlayer) {
+      return { isCorrect: false, points: 0, nextIndex: 0, isFinished: false };
+    }
+
+    const currentQIdx = currentPlayer.currentQuestionIndex || 0;
+    const currentQId = activeSession.questionIds[currentQIdx];
     const currentQ = questions.find(q => q.id === currentQId);
-    if (!currentQ) return;
 
-    // Check if player already answered this question
-    const alreadyAnswered = currentPlayer.answers.some(a => a.questionId === currentQId);
-    if (alreadyAnswered) return;
-
-    const isCorrect = optionIndex === currentQ.correctAnswer;
+    const isCorrect = currentQ ? optionIndex === currentQ.correctAnswer : false;
     let pointsEarned = 0;
     let newStreak = 0;
 
     if (isCorrect) {
-      // Base points + speed bonus + streak bonus
-      const speedRatio = Math.max(0, (activeSession.timePerQuestion - timeSpentSec) / activeSession.timePerQuestion);
+      const timePerQ = activeSession.timePerQuestion || 20;
+      const speedRatio = Math.max(0, (timePerQ - timeSpentSec) / timePerQ);
       pointsEarned = Math.round(1000 + speedRatio * 500 + Math.min(currentPlayer.streak * 100, 500));
       newStreak = currentPlayer.streak + 1;
       soundManager.playCorrect();
@@ -436,7 +544,7 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       soundManager.playWrong();
     }
 
-    const newAnswer = {
+    const newAnswer: PlayerAnswer = {
       questionId: currentQId,
       selectedOption: optionIndex,
       isCorrect,
@@ -444,27 +552,53 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
       pointsEarned,
     };
 
+    const nextIndex = currentQIdx + 1;
+    const isFinished = nextIndex >= activeSession.questionIds.length;
+
     const updatedPlayer: Player = {
       ...currentPlayer,
       score: currentPlayer.score + pointsEarned,
       streak: newStreak,
       lastAnswerCorrect: isCorrect,
       lastPointsEarned: pointsEarned,
+      currentQuestionIndex: currentQIdx, // Keep at current until advance
+      isFinished,
+      finishedAt: isFinished ? Date.now() : undefined,
       answers: [...currentPlayer.answers, newAnswer],
     };
 
-    const updatedPlayers = activeSession.players.map(p => 
-      p.id === updatedPlayer.id ? updatedPlayer : p
-    );
+    setCurrentPlayer(updatedPlayer);
 
-    const updatedSession: QuizSession = {
-      ...activeSession,
-      players: updatedPlayers,
+    // Save to cloud key
+    savePlayerToCloud(activeSession.pin, updatedPlayer);
+
+    return {
+      isCorrect,
+      points: pointsEarned,
+      nextIndex,
+      isFinished,
+    };
+  };
+
+  // Advance player to next question
+  const advanceToNextQuestion = () => {
+    if (!activeSession || !currentPlayer) return;
+    const nextIdx = (currentPlayer.currentQuestionIndex || 0) + 1;
+    const isFinished = nextIdx >= activeSession.questionIds.length;
+
+    const updated: Player = {
+      ...currentPlayer,
+      currentQuestionIndex: nextIdx,
+      isFinished,
+      finishedAt: isFinished ? Date.now() : undefined,
     };
 
-    setCurrentPlayer(updatedPlayer);
-    setActiveSession(updatedSession);
-    broadcastSession(updatedSession);
+    setCurrentPlayer(updated);
+    savePlayerToCloud(activeSession.pin, updated);
+
+    if (isFinished) {
+      soundManager.playVictory();
+    }
   };
 
   const leaveSession = () => {
@@ -484,15 +618,17 @@ export const QuizProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resetQuestions,
         activeSession,
         createSession,
+        startSession,
         setGameStage,
-        nextQuestion,
         endGame,
         addSimulatedStudents,
         kickPlayer,
         currentPlayer,
         joinSession,
-        submitAnswer,
+        submitStudentAnswer,
+        advanceToNextQuestion,
         leaveSession,
+        syncWithCloud,
         isMuted,
         toggleMute,
         recaps,

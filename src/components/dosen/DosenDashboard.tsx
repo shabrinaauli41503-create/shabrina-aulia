@@ -168,7 +168,7 @@ export const DosenDashboard: React.FC = () => {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Rekap_Nilai_KuisMobile_${Date.now()}.csv`);
+    link.setAttribute('download', `Rekap_Nilai_Quizzy_PemrogramanWeb_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -197,10 +197,10 @@ export const DosenDashboard: React.FC = () => {
               <span>UAS Pemrograman Web 2</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold font-display tracking-tight text-white">
-              Ruang Kendali Kuis Mobile
+              Ruang Kendali Kuis Interaktif
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-              Kelola bank soal Flutter, buka sesi kuis dengan PIN unik, dan pantau hasil secara real-time.
+              Kelola bank soal Pemrograman Web, buka sesi kuis dengan PIN unik, dan pantau hasil secara real-time.
             </p>
           </div>
 
@@ -282,7 +282,7 @@ export const DosenDashboard: React.FC = () => {
                         value={sessionTitle}
                         onChange={(e) => setSessionTitle(e.target.value)}
                         className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500 transition-colors"
-                        placeholder="Contoh: UAS Pemrograman Mobile Genap 2026"
+                        placeholder="Contoh: Kuis Pemrograman Web - Full-Stack & API"
                       />
                     </div>
 
@@ -331,7 +331,7 @@ export const DosenDashboard: React.FC = () => {
                           onChange={(e) => setSelectedCategoryFilter(e.target.value)}
                           className="w-full px-4 py-2.5 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
                         >
-                          <option value="Semua">Semua Materi (Campuran Flutter & Dart)</option>
+                          <option value="Semua">Semua Materi (HTML, CSS, JS, React, Node, DB)</option>
                           {CATEGORIES.map(cat => (
                             <option key={cat} value={cat}>{cat}</option>
                           ))}
@@ -379,7 +379,7 @@ export const DosenDashboard: React.FC = () => {
                       </li>
                       <li className="flex items-start gap-2.5">
                         <span className="w-5 h-5 rounded-full bg-slate-800 text-sky-400 font-mono font-bold flex items-center justify-center shrink-0 text-[10px]">3</span>
-                        <span>Dosen menekan tombol <strong>Mulai Kuis</strong>. Soal Flutter muncul serentak di HP mahasiswa dengan hitung mundur waktu.</span>
+                        <span>Dosen menekan tombol <strong>Mulai Kuis</strong>. Soal Pemrograman Web muncul serentak di HP mahasiswa dengan hitung mundur waktu.</span>
                       </li>
                       <li className="flex items-start gap-2.5">
                         <span className="w-5 h-5 rounded-full bg-slate-800 text-sky-400 font-mono font-bold flex items-center justify-center shrink-0 text-[10px]">4</span>
@@ -396,7 +396,7 @@ export const DosenDashboard: React.FC = () => {
                     <div>
                       <div className="text-xs text-slate-400">Total Soal Siap Pakai</div>
                       <div className="text-2xl font-bold font-mono text-white mt-0.5">{questions.length} Soal</div>
-                      <div className="text-[11px] text-slate-500">Mencakup Flutter, Dart, State Management, API & SQLite</div>
+                      <div className="text-[11px] text-slate-500">Mencakup Frontend, Backend, REST API, Database & Security</div>
                     </div>
                     <button
                       onClick={() => setActiveTab('BANK_SOAL')}
@@ -458,12 +458,12 @@ export const DosenDashboard: React.FC = () => {
               <div className="flex items-center gap-2.5">
                 <button
                   onClick={() => {
-                    if (confirm('Kembalikan bank soal ke 32 soal bawaan Flutter?')) {
+                    if (confirm('Kembalikan bank soal ke 35 soal standar Pemrograman Web?')) {
                       resetQuestions();
                       soundManager.playTap();
                     }
                   }}
-                  title="Reset ke 32 soal bawaan Flutter"
+                  title="Reset ke 35 soal standar Pemrograman Web"
                   className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition-colors"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
@@ -704,7 +704,7 @@ export const DosenDashboard: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl p-6 sm:p-8 space-y-5 my-8 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-lg font-bold font-display text-white">
-                {editingQuestion ? 'Edit Soal Flutter' : 'Tambah Soal Baru'}
+                {editingQuestion ? 'Edit Soal Pemrograman Web' : 'Tambah Soal Baru'}
               </h3>
               <button
                 onClick={() => setShowQuestionModal(false)}
@@ -723,7 +723,7 @@ export const DosenDashboard: React.FC = () => {
                   rows={3}
                   value={formQuestion}
                   onChange={(e) => setFormQuestion(e.target.value)}
-                  placeholder="Contoh: Widget apa yang digunakan untuk mengatur posisi bertumpuk?"
+                  placeholder="Contoh: Tag HTML manakah yang digunakan untuk menampilkan video?"
                   className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500"
                   required
                 />
@@ -731,13 +731,13 @@ export const DosenDashboard: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Potongan Kode Dart / Flutter (Opsional)
+                  Potongan Kode JS / HTML / SQL (Opsional)
                 </label>
                 <textarea
                   rows={3}
                   value={formCode}
                   onChange={(e) => setFormCode(e.target.value)}
-                  placeholder="Contoh: final controller = TextEditingController();"
+                  placeholder="Contoh: const [count, setCount] = useState(0);"
                   className="w-full px-3.5 py-2.5 bg-slate-950 font-mono text-xs text-emerald-400 border border-slate-700 rounded-xl focus:outline-none focus:border-indigo-500"
                 />
               </div>

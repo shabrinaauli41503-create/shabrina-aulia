@@ -6,9 +6,9 @@ export interface AvatarOption {
 }
 
 export const AVATAR_OPTIONS: AvatarOption[] = [
-  { id: 'flutter-dev', emoji: '💙', label: 'Flutterist', bgColor: 'bg-sky-500/20 text-sky-400 border-sky-500/40' },
-  { id: 'dart-ninja', emoji: '🎯', label: 'Dart Ninja', bgColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' },
-  { id: 'mobile-geek', emoji: '📱', label: 'App Builder', bgColor: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40' },
+  { id: 'web-dev', emoji: '🌐', label: 'Web Architect', bgColor: 'bg-sky-500/20 text-sky-400 border-sky-500/40' },
+  { id: 'js-ninja', emoji: '⚡', label: 'JS Ninja', bgColor: 'bg-amber-500/20 text-amber-400 border-amber-500/40' },
+  { id: 'react-pro', emoji: '⚛️', label: 'React Pro', bgColor: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40' },
   { id: 'code-master', emoji: '💻', label: 'Coder Pro', bgColor: 'bg-purple-500/20 text-purple-400 border-purple-500/40' },
   { id: 'rocket-pilot', emoji: '🚀', label: 'Rocket Dev', bgColor: 'bg-rose-500/20 text-rose-400 border-rose-500/40' },
   { id: 'pixel-wizard', emoji: '⚡', label: 'Fast Hacker', bgColor: 'bg-amber-500/20 text-amber-400 border-amber-500/40' },
